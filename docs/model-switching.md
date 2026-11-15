@@ -24,6 +24,8 @@ llm-use dsv41         # requires completed DeepSeek preparation
 
 ## Current qualification boundary
 
-The controller and client adapter have unit tests and a real stopped-state status check. They have not yet passed live GLM ↔ DeepSeek switching. DeepSeek preparation, canary qualification, boot-selector integration, Open WebUI verification, and the Hindsight Node 2 adapter remain separate completion gates.
+The controller and client adapter have unit tests and a real stopped-state status check. They have not yet passed live GLM ↔ DeepSeek switching. DeepSeek preparation, canary qualification, Open WebUI verification, and the Hindsight Node 2 adapter remain separate completion gates.
+
+Boot-selector integration is installed behind the existing `glm53-tf-autostart.timer`, with the pre-selector script backed up. The selector reads the saved model, applies GLM's or DeepSeek's memory threshold, starts DeepSeek with `PREPARE=0`, and runs full verification. Its four tests cover invalid selection, handled-boot idempotence, and GLM/DeepSeek dry-runs. The current handled boot pair was also dry-run verified to take no action. A real reboot has not been performed.
 
 Hindsight is deliberately not modified while its service is being relocated to Node 2.
