@@ -367,6 +367,14 @@ def main(argv=None) -> int:
             core.switch(args.action)
             driver.log(f"Selected and verified {args.action}")
         return 0
+    except BrokenPipeError:
+        # A consumer such as grep -q may close the pipe after finding a status line.
+        # Do not log a spurious error or emit a second traceback during shutdown.
+        try:
+            sys.stdout.close()
+        except BrokenPipeError:
+            pass
+        return 0
     except (SwitchError, subprocess.TimeoutExpired, OSError) as e:
         driver.log(f"ERROR: {e}")
         return 1
