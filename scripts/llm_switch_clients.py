@@ -144,15 +144,13 @@ def plan(root: Path, target_name: str):
         original = pi_models.read_text()
         doc = json.loads(original)
         settings = json.loads(pi_settings.read_text()) if pi_settings.is_file() else {}
+        original_settings = copy.deepcopy(settings)
         retarget_pi(doc, settings, target_name)
         rendered = json.dumps(doc, indent=2) + "\n"
         if rendered != original:
             changes[pi_models] = rendered
-        if pi_settings.is_file():
-            original_settings = pi_settings.read_text()
-            rendered_settings = json.dumps(settings, indent=2) + "\n"
-            if rendered_settings != original_settings:
-                changes[pi_settings] = rendered_settings
+        if pi_settings.is_file() and settings != original_settings:
+            changes[pi_settings] = json.dumps(settings, indent=2) + "\n"
 
     if reference_count == 0:
         raise ValueError("no Hermes local-provider references were found; refusing to claim client selection")

@@ -90,6 +90,22 @@ class ClientTests(unittest.TestCase):
             doc = clients.load_yaml(config.read_text())
             self.assertEqual(doc["fallback_providers"][0]["provider"], "custom:dsv41-exl3")
 
+    def test_newline_only_pi_settings_difference_is_not_a_change(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            config = root / ".hermes/config.yaml"
+            config.parent.mkdir(parents=True)
+            config.write_text(YAML_SOURCE)
+            pi = root / ".pi/agent"
+            pi.mkdir(parents=True)
+            (pi / "models.json").write_text(json.dumps({"providers": {"glm-exl3": {
+                "models": [{"id": "GLM-5.3-Flash-EXL3", "contextWindow": 600000}]
+            }}}))
+            settings = pi / "settings.json"
+            settings.write_text('{"defaultProvider":"ollama-cloud","defaultModel":"kimi-k3"}')
+            changes = clients.plan(root, "dsv41")
+            self.assertNotIn(settings, changes)
+
     def test_dry_run_does_not_write(self):
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td)
