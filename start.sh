@@ -153,7 +153,7 @@ if (( ! DRY )) && [[ "$MODE" == start ]] && running_here && running_worker 1; th
 fi
 
 # ---------------------------------------------------------------- 1. setup
-step 1 "Setup: image, checkpoint, Engram's tables, weight files and kit; the worker's NFS volume and disk"
+step 1 "Setup: image, checkpoint, Engram's tables, weight files and kit; the worker's runtime files and disk"
 # (a state that cannot be computed is an error here, not "equal to a missing marker": both read empty otherwise)
 need_prepare=0
 case "${PREPARE:-auto}" in
@@ -194,8 +194,10 @@ if [[ -n "$HEAD_ENGRAM_DIR" ]] && (( ! DRY )); then
 fi
 detect_links
 log "Link: rendezvous $MASTER_ADDR:$MASTER_PORT"
+worker_storage="NFS from ${LINK_HEAD_ADDR[1]:-?}"
+[[ "${NO_NFS:-0}" != 1 ]] || worker_storage="local HF at $NFS_VOLUME"
 for r in 0 1; do
-  log "  rank $r ($( (( r == 0 )) && echo this node || worker_host "$r")): RoCE ${NODE_HCAS[r]} (GID ${NODE_GID[r]})$( (( r == 0 )) || echo ", NFS from ${LINK_HEAD_ADDR[r]:-?}")"
+  log "  rank $r ($( (( r == 0 )) && echo this node || worker_host "$r")): RoCE ${NODE_HCAS[r]} (GID ${NODE_GID[r]})$( (( r == 0 )) || echo ", $worker_storage")"
 done
 # the serve flags against what this build of tensorfold-native serves (scripts/zig_flags.py, from the GLM-5.3-Flash recipe):
 # the binary refuses an unsupported flag at start, after the container is up and the old server stopped

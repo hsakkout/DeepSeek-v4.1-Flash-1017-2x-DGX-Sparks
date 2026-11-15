@@ -33,6 +33,15 @@ for arg in "$@"; do
     *) die "unknown argument: $arg" ;;
   esac
 done
+# Fail before image builds or downloads. The local-worker path is deliberately stock-only and uses absolute worker paths.
+if [[ "${NO_NFS:-0}" == 1 ]]; then
+  [[ "$ABLIT" == 0 ]] || die "NO_NFS=1 currently supports stock weights only (ABLIT=0)"
+  [[ "${VERIFY_SHA:-0}" == 1 ]] || die "NO_NFS=1 requires VERIFY_SHA=1"
+  [[ "$NFS_VOLUME" == /* && "$NFS_VOLUME" != / && "$NFS_VOLUME" != "$HF_CACHE" ]] ||
+    die "NO_NFS=1 needs a dedicated absolute worker-local NFS_VOLUME path"
+  [[ "$WORKER_ENGRAM_DIR" == /* && "$WORKER_CACHE_DIR" == /* ]] ||
+    die "NO_NFS=1 needs absolute WORKER_ENGRAM_DIR and WORKER_CACHE_DIR paths (not literal \$HOME)"
+fi
 ablit_notice
 
 # ---------------------------------------------------------------- 1. preflight
@@ -57,7 +66,7 @@ need_worker 1
 worker 1 'docker info >/dev/null 2>&1' || die "$(worker_host 1) cannot talk to its docker daemon (docker group?)"
 worker 1 'nvidia-smi -L >/dev/null 2>&1' || warn "nvidia-smi failed on $(worker_host 1)"
 detect_links
-log "Link: this node $HEAD_ADDR ($HEAD_DEV, RoCE $HEAD_HCAS) <-> $(worker_host 1) $WORKER_ADDR ($WORKER_DEV, RoCE $WORKER_HCAS); NFS from $(nfs_server 1)"
+log "Link: this node $HEAD_ADDR ($HEAD_DEV, RoCE $HEAD_HCAS) <-> $(worker_host 1) $WORKER_ADDR ($WORKER_DEV, RoCE $WORKER_HCAS); $( [[ "${NO_NFS:-0}" == 1 ]] && echo "worker-local files at $NFS_VOLUME" || echo "NFS from $(nfs_server 1)")"
 
 # ---------------------------------------------------------------- 2. the image
 hash=$(image_hash)
@@ -257,7 +266,10 @@ rm -rf "$VIEW" && mv "$VIEW.new" "$VIEW"
 [[ -s "$VIEW/config.json" ]] || die "the served folder $VIEW does not reach the checkpoint"
 log "Served folder: $VIEW (the checkpoint linked, the recipe's chat template)"
 
-# ---------------------------------------------------------------- 6. the worker's NFS volume
+# ---------------------------------------------------------------- 6-7. worker files: local tree or the standard NFS layout
+if [[ "${NO_NFS:-0}" == 1 ]]; then
+  source ./scripts/prepare-local-worker.sh
+else
 manifest() {  # the files a rank reads, with their sizes, as paths under HF_CACHE
   (cd "$HF_CACHE" && find -L "hub/models--${MODEL_ID//\//--}/snapshots/$(snapshot_rev)" \
      "hub/models--${ENGRAM_ID//\//--}/snapshots/$(engram_rev)" "$DATA_SUB" "$KIT_SUB/kit" \
@@ -296,6 +308,7 @@ else
   worker 1 "docker run --rm --network none --user \$(id -u):\$(id -g) -e HOME=/tmp -v '$NFS_VOLUME:/hf:ro' -v $WORKER_CACHE_DIR:/out --entrypoint tf-dsv41-rank-cache '$IMAGE' '$SNAP_C' /out 1 2" >/dev/null ||
     die "writing rank 1's weight file on $(worker_host 1) failed"
 fi
+fi  # NO_NFS
 
 write_prepared_marker || die "cannot record the prepared state (the previous marker is left as it was): see the error above"
 log "Done: both Sparks are ready. Start the server with ./start.sh (port $PORT)."
