@@ -11,6 +11,7 @@ import base64
 import concurrent.futures as cf
 import io
 import json
+import os
 import struct
 import sys
 import time
@@ -37,7 +38,20 @@ failed = []
 
 
 def post(body, timeout=900):
-    req = urllib.request.Request(URL + "/v1/chat/completions", json.dumps(body).encode(), {"content-type": "application/json"})
+    headers = {"content-type": "application/json"}
+    key = os.environ.get("API_KEY", "").strip()
+    if not key:
+        path = os.environ.get("API_KEY_FILE", os.path.expanduser("~/.local/state/dsv41-tensorfold/api-key"))
+        try:
+            with open(path) as f:
+                key = next((x.strip() for x in f if x.strip() and not x.startswith("#")), "")
+        except OSError:
+            key = ""
+        if ":" in key:
+            key = key.split(":", 1)[1].strip()
+    if key:
+        headers["Authorization"] = "Bearer " + key
+    req = urllib.request.Request(URL + "/v1/chat/completions", json.dumps(body).encode(), headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.load(r)
