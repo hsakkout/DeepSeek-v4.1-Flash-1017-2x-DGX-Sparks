@@ -5,6 +5,7 @@ import json
 import pathlib
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("llm_switch_clients", ROOT / "scripts" / "llm_switch_clients.py")
@@ -106,7 +107,16 @@ class ClientTests(unittest.TestCase):
             changes = clients.plan(root, "dsv41")
             self.assertNotIn(settings, changes)
 
-    def test_dry_run_does_not_write(self):
+    def test_hindsight_render_preserves_other_settings(self):
+        original = "export HINDSIGHT_API_LLM_MODEL=GLM-5.3-Flash-EXL3\nOTHER=value\n"
+        rendered = clients.render_hindsight(original, "dsv41")
+        self.assertIn("export HINDSIGHT_API_LLM_MODEL=DeepSeek-V4.1-Flash-1017\n", rendered)
+        self.assertIn("OTHER=value\n", rendered)
+        with self.assertRaisesRegex(ValueError, "missing"):
+            clients.render_hindsight("OTHER=value\n", "dsv41")
+
+    @mock.patch.object(clients, "update_hindsight")
+    def test_dry_run_does_not_write(self, hindsight):
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td)
             config = root / ".hermes/config.yaml"

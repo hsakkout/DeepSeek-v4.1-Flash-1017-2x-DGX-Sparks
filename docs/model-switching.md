@@ -24,8 +24,8 @@ llm-use dsv41         # requires completed DeepSeek preparation
 
 ## Current qualification boundary
 
-The controller and client adapter have unit tests and a real stopped-state status check. They have not yet passed live GLM ↔ DeepSeek switching. DeepSeek preparation, canary qualification, Open WebUI verification, and the Hindsight Node 2 adapter remain separate completion gates.
+The controller and client adapter have unit tests, live dry-runs, real stopped-state status checks, and a successful idempotent DeepSeek selection. Hermes's real resolver confirmed both profiles keep their cloud primary and use the DeepSeek local fallback. The Hindsight Node 2 adapter atomically updates the relocated `hindsight-api.service`, restores the prior file on verification failure, and verifies health plus the live process model. Its real DeepSeek update passed. DeepSeek has also passed the local canary, but live GLM ↔ DeepSeek switching, Open WebUI verification, and the longer stability qualification remain completion gates.
 
 Boot-selector integration is installed behind the existing `glm53-tf-autostart.timer`, with the pre-selector script backed up. The selector reads the saved model, applies GLM's or DeepSeek's memory threshold, starts DeepSeek with `PREPARE=0`, and runs full verification. Its four tests cover invalid selection, handled-boot idempotence, and GLM/DeepSeek dry-runs. The current handled boot pair was also dry-run verified to take no action. A real reboot has not been performed.
 
-Hindsight is deliberately not modified while its service is being relocated to Node 2.
+Hindsight is relocated to Node 2. The adapter uses the LAN admin address for its service management, while Hindsight's own inference backend remains the ConnectX address `192.168.200.1:8888/v1`. The Node 1 service is not modified.

@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -190,6 +191,92 @@ def apply(changes, state_dir: Path) -> Path:
     return backup_dir
 
 
+HINDSIGHT_HOST = "sakkout@10.0.1.20"
+HINDSIGHT_ENV = "/home/sakkout/.config/hindsight/server.env"
+HINDSIGHT_SERVICE = "hindsight-api.service"
+
+
+def render_hindsight(original: str, target_name: str) -> str:
+    key = "HINDSIGHT_API_LLM_MODEL"
+    value = TARGETS[target_name]["model"]
+    found = False
+    lines = []
+    for line in original.splitlines(keepends=True):
+        stripped = line.lstrip()
+        prefix = "export " if stripped.startswith("export ") else ""
+        body = stripped[len(prefix):]
+        if body.startswith(key + "="):
+            newline = "\n" if line.endswith("\n") else ""
+            lines.append(prefix + key + "=" + value + newline)
+            found = True
+        else:
+            lines.append(line)
+    if not found:
+        raise ValueError(f"{key} is missing from the Node 2 Hindsight environment")
+    return "".join(lines)
+
+
+def update_hindsight(target_name: str, apply_changes: bool) -> None:
+    """Atomically retarget the relocated Node 2 service and verify its live process."""
+    ssh = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", HINDSIGHT_HOST]
+
+    def remote(command: str, *, input_text=None, timeout=30):
+        return subprocess.run(ssh + [command], input=input_text, text=True, capture_output=True,
+                              timeout=timeout, check=True).stdout
+
+    original = remote("cat " + HINDSIGHT_ENV)
+    rendered = render_hindsight(original, target_name)
+    expected = TARGETS[target_name]["model"]
+    if rendered == original:
+        print(f"Hindsight Node 2 already selects {expected}; no restart needed")
+        return
+    if not apply_changes:
+        print(f"Dry-run: Hindsight Node 2 would select {expected} and restart {HINDSIGHT_SERVICE}")
+        return
+
+    stamp = time.strftime("%Y%m%dT%H%M%S")
+    backup = HINDSIGHT_ENV + ".bak-" + stamp
+    tmp = HINDSIGHT_ENV + ".llm-switch.tmp"
+    remote(f"cp --preserve=mode,timestamps {HINDSIGHT_ENV} {backup}")
+
+    def write_remote(content: str):
+        remote(f"umask 077; cat > {tmp} && chmod 600 {tmp} && mv {tmp} {HINDSIGHT_ENV}",
+               input_text=content, timeout=30)
+        if remote("cat " + HINDSIGHT_ENV) != content:
+            raise OSError("Hindsight Node 2 read-back verification failed")
+
+    def restart_and_verify(expected_model: str):
+        remote(f"systemctl --user restart {HINDSIGHT_SERVICE}", timeout=60)
+        deadline = time.monotonic() + 45
+        while True:
+            try:
+                remote("curl -fsS --max-time 3 http://127.0.0.1:18780/health >/dev/null", timeout=8)
+                break
+            except subprocess.CalledProcessError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(1)
+        command = (
+            f"pid=$(systemctl --user show {HINDSIGHT_SERVICE} -p MainPID --value) && "
+            "python3 -c 'import os,sys; d=dict(x.split(\"=\",1) for x in "
+            "open(\"/proc/\"+sys.argv[1]+\"/environ\",\"rb\").read().decode(errors=\"replace\").split(\"\\0\") "
+            "if \"=\" in x); print(d.get(\"HINDSIGHT_API_LLM_MODEL\",\"\"))' \"$pid\""
+        )
+        actual = remote(command).strip()
+        if actual != expected_model:
+            raise OSError(f"Hindsight live model verification failed: {actual!r} != {expected_model!r}")
+
+    write_remote(rendered)
+    try:
+        restart_and_verify(expected)
+    except Exception:
+        write_remote(original)
+        restart_and_verify(TARGETS["glm"]["model"] if "GLM-5.3-Flash-EXL3" in original
+                           else TARGETS["dsv41"]["model"])
+        raise
+    print(f"Hindsight Node 2 verified {expected}; backup: {HINDSIGHT_HOST}:{backup}")
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("target", choices=sorted(TARGETS))
@@ -208,9 +295,10 @@ def main(argv=None) -> int:
             print(f"Dry-run: {len(changes)} client file(s) would change")
             for path in changes:
                 print(path)
-        print("Hindsight: deferred until its Node 2 relocation is complete")
+        update_hindsight(args.target, args.apply)
         return 0
-    except (OSError, ValueError, json.JSONDecodeError) as e:
+    except (OSError, ValueError, json.JSONDecodeError, subprocess.CalledProcessError,
+            subprocess.TimeoutExpired) as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
 
